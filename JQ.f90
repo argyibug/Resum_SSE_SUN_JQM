@@ -1,4 +1,4 @@
-! Zhou Chengkang
+! Zhou Chengkang : zhouchk@connect.hku.hk
 ! 09222023
 ! Ref Phys. Rev. B 104, L060406
 module configuration
