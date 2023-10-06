@@ -1,6 +1,3 @@
-! Zhou Chengkang : zhouchk@connect.hku.hk
-! 09222023
-! Ref Phys. Rev. B 104, L060406
 module configuration
 !----------------------------------------------!
 ! Most important parameters and data structures
@@ -45,6 +42,7 @@ module configuration
  integer :: loopnum1
  integer :: loopnumper
  integer :: loopnumber
+ integer :: loopnummax
  integer :: looporder
  integer :: dloop
 
@@ -106,6 +104,7 @@ module measurementdata
  integer, allocatable :: tgrd(:)   	!grid of time points
  
  real(8), allocatable :: tcor(:,:)    !correlation function in momentum space
+ real(8), allocatable :: tcor_real(:,:)    !correlation function in momentum space
  real(8), allocatable :: tcorpm(:,:)    !correlation function in momentum space
  real(8), allocatable :: tcordm(:,:,:)    !correlation function in momentum space
  real(8), allocatable :: tcordz(:,:,:)    !correlation function in momentum space
@@ -200,7 +199,7 @@ program Jperp_J_heisenberg_sse
 	implicit none
 	include 'mpif.h'
 	integer :: ierr,nprocs
-	integer :: rank
+	integer :: rank,sz
 	integer :: i,j,nbins,msteps,isteps,tmsr,gtype
 	real(8) :: tmax,qq
 
@@ -253,10 +252,12 @@ program Jperp_J_heisenberg_sse
 !==================================================================!
 	!Do isteps equilibration sweeps, find the necessary sweep
 	do i=1,isteps
-		call Bilibiliupdate(rank)
+		call Bilibiliupdate(rank,1,10)
+		!print*,"a1"
 		call adjustcutoff(i)		
+		!print*,"b1"
 		if (mod(i,5000)==1d0) print*,rank,"warm",i,"/",isteps
-		!print*,"d"
+		!print*,"c"
 	enddo
 !==================================================================!
 
@@ -272,8 +273,10 @@ program Jperp_J_heisenberg_sse
 	do j=1,nbins
 		bincounter=bincounter+1
 		do i=1,msteps
-			call Bilibiliupdate(rank)
+			call Bilibiliupdate(rank,1,10)
+			!print*,"a2"
 			call measure()
+			!print*,"b2"
 			if (mod(i,tmsr)==0) then
 			endif
 			if (mod(i,2000)==1d0) print*,rank,"states",i,"/",msteps
@@ -325,17 +328,18 @@ subroutine initconfig(rank)
 	opstfp(:,:)=0                         !according to whether it is a sub-programme
 	allocate(vertexlist(0:dxl*mm-1,3))        !according to whether it is a sub-programme
 	allocate(vertexlist_map(0:dxl*mm-1))    !according to whether it is a sub-programme
-	allocate(rantau(nh))				   !according to whether it is a sub-programme
+	allocate(rantau(nn))				   !according to whether it is a sub-programme
+    allocate(oporder(nn))
 	nh=0								   !according to whether it is a sub-programme
 !=============================================================================!
 !=============================================================================!
 	!call readconfig(rank)          !according to whether it is a sub-programme
 !=============================================================================!	
-    allocate(oporder(nn))
 	allocate(frststateop(nn))
 	allocate(custstateop(nn))
 	allocate(laststateop(nn))
 	allocate(rebootloop(2))
+	oporder(:)=-1
 	frststateop(:)=-1
 	custstateop(:)=-1
 	laststateop(:)=-1
@@ -361,6 +365,7 @@ subroutine initconfig(rank)
     vertexlist_map(:)=-1
     loopnum0=nn
     loopnum1=0d0
+    loopnummax=0d0
     loopnumber=loopnum0+loopnum1
 
 end subroutine initconfig
@@ -493,15 +498,19 @@ end subroutine makelinktype
 !==================================================!
 
 
-subroutine Bilibiliupdate(rank)
+subroutine Bilibiliupdate(rank,update_type,lim_counter)
 	use configuration
 	use measurementdata
 	implicit none
 
-	integer :: i,j,s,b,op,rank,cs,s1,k,bs,sig,crsign
+	integer :: i,j,s,b,op,rank,cs,s1,k,bs,sig,crsign,update_type,lim_counter,update_counter
+	integer :: mm_sug,mm_tmp,opod_sug,opod_pre,opod_aft
 	real(8) :: wght1,wght2,wght3,wghtq3
+	integer, allocatable :: tmststateop(:)
 	real(8), external :: ran
 	real(8), external :: hf
+	allocate(tmststateop(nn))
+	tmststateop(:)=0d0
  
  	!if ( rank==0 ) then 
 		!do i=1,nb
@@ -509,13 +518,79 @@ subroutine Bilibiliupdate(rank)
 		!enddo
 	!endif
 
+
 	wght1=g2*0.5d0
 	wght2=jq1*0.5d0
 	wght3=0d0
 	wghtq3=qq3*((0.5d0)**3d0)
 
-	do i=0, mm-1
+	update_counter=0d0
+	i=mm-1
+	!do i=0,mm-1
+	!mm_sug=int(mm*ran())
+
+	!print*,"======================================"
+	!tmststateop(:)=custstateop(:)
+	!do j=1,nh
+	!	mm_tmp=oporder(j)
+	!	print*,j,mm_tmp,nh
+	!	if (opstring(mm_tmp)==0) pause
+	!	b=opstring(mm_tmp)/4
+	!	call gencurstateop(mm_tmp,b,0)
+	!enddo
+	!print*,nh+1,oporder(nh+1),nh
+
+	!do j=1,nn
+	!	if (custstateop(j)/=tmststateop(j)) then
+	!		print*,"miss"
+	!	else
+	!	!print*,"check"
+	!	endif
+	!enddo
+	!print*,"0000000000000000000000000000000000"
+
+	do
+		if (update_type==0) then
+			i=mod(i+1,mm)
+
+			if (update_counter>mm) then
+				exit
+			endif
+		elseif (update_type==1) then
+			mm_sug=int(mm*ran())
+			opod_sug=tauscale(mm_sug)
+
+			if (update_counter>lim_counter) then
+				exit
+			endif
+			!print*,mm_sug,opod_sug,opstring(mm_sug),nh
+
+			if (nh==0) then
+			else
+				if (opstring(mm_sug)==0) then
+					opod_pre=mod(opod_sug+nh-1,nh)+1
+				else
+					opod_pre=mod(opod_sug+nh-2,nh)+1
+				endif
+				!print*,"pre",mm_sug,opod_sug,opod_pre,opstring(mm_sug)
+				do j=1,opod_pre
+					mm_tmp=oporder(j)
+					!print*,j,mm_tmp,nh
+					if (opstring(mm_tmp)==0) pause
+					b=opstring(mm_tmp)/4
+					call gencurstateop(mm_tmp,b,0)
+				enddo
+			endif
+
+			i=mm_sug
+
+		endif
+		!print*,"+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++",opstring(mm_sug),nh
+		update_counter=update_counter+1
+		!print*,i,update_type,update_counter,lim_counter,mm
+!=============================================================================================================================!
 		op=opstring(i)
+
 		if ( op==0 ) then
 			b=int(ran()*nb)+1
 			call caldloop(i,b,1)
@@ -541,7 +616,7 @@ subroutine Bilibiliupdate(rank)
 			 		call addoperator(i,b,rank)
 		 		endif
 		 	endif
-		else
+		elseif ( op/=0 ) then
 		 	b=op/4
 			call caldloop(i,b,-1)
 		 	if (b<=2*nn) then
@@ -550,8 +625,11 @@ subroutine Bilibiliupdate(rank)
 			 		opstfp(i,:)=0
 		 			nh=nh-1
 			 		call remoperator(i,b,rank)
+					!call gencurstateop(i,b,0)
+			 		!print*,"checkpoint1"
 			 	else
 					call gencurstateop(i,b,0)
+			 		!print*,"checkpoint2"
 		 		endif
 			elseif (b>2*nn .and. b<=4*nn) then
 				if ( ran()*prob*(wght1)<=(mm-nh+1)*(sun**dloop) ) then
@@ -559,8 +637,11 @@ subroutine Bilibiliupdate(rank)
 			 		opstfp(i,:)=0
 		 			nh=nh-1
 			 		call remoperator(i,b,rank)
+					!call gencurstateop(i,b,0)
+			 		!print*,"checkpoint3"
 			 	else
 					call gencurstateop(i,b,0)
+			 		!print*,"checkpoint4"
 			 	endif
 		 	elseif (b>4*nn) then
 				if ( ran()*(wghtq3)*prob<=(mm-nh+1)*(sun**dloop) ) then
@@ -568,16 +649,56 @@ subroutine Bilibiliupdate(rank)
 			 		opstfp(i,:)=0
 		 			nh=nh-1
 			 		call remoperator(i,b,rank)
+					!call gencurstateop(i,b,0)
+			 		!print*,"checkpoint5"
 			 	else
 					call gencurstateop(i,b,0)
+			 		!print*,"checkpoint6"
 		 		endif
 		 	endif
 		 endif
+		!print*,"+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++",opstring(mm_sug),nh
+!=============================================================================================================================!
+
+		if (update_type==0) then
+		elseif (update_type==1) then
+			if (nh==0) then
+			else
+				opod_sug=tauscale(mm_sug)
+				opod_aft=mod(opod_sug,nh)+1
+				!print*,"aft",mm_sug,opod_sug,opod_aft,opstring(mm_sug)
+				if (opod_sug==opod_aft) then
+				else
+					!print*,opod_sug,mm_sug,nh,"sug"
+					do j=opod_aft,nh
+						mm_tmp=oporder(j)
+						!print*,j,mm_tmp,nh
+						if (opstring(mm_tmp)==0) pause
+						b=opstring(mm_tmp)/4
+						call gencurstateop(mm_tmp,b,0)
+					enddo
+				endif
+			endif
+		endif
 	enddo
 
 	if (loopnumber/=loopnum0+loopnum1) then
-		print*,loopnumber,loopnum0,loopnum1
+		print*,loopnumber,loopnum0,loopnum1,"neq"
 		pause
+	endif
+
+	if (update_type==0) then
+		do j=1,nh
+			mm_tmp=oporder(j)
+			b=opstring(mm_tmp)/4
+			call gencurstateop(mm_tmp,b,0)
+		enddo
+	else
+		do j=1,nh
+			mm_tmp=oporder(j)
+			b=opstring(mm_tmp)/4
+			call gencurstateop(mm_tmp,b,0)
+		enddo
 	endif
 
 	do i=1,nn
@@ -868,6 +989,8 @@ subroutine addoperator(mm_pos,b_pos,rank)
 	endif
 	!print*,"markloop"
 
+	call updateoporder(mm_pos,1)
+
 end subroutine addoperator
 !==================================================!
 
@@ -909,6 +1032,8 @@ subroutine remoperator(mm_pos,b_pos,rank)
 	endif
 	!print*,"markloop"
 
+	call updateoporder(mm_pos,-1)
+
 end subroutine remoperator
 !==================================================!
 
@@ -934,6 +1059,8 @@ subroutine markloop(vt,signal,rank)
 	else
 		loopnumt=loopnum1+1
 	endif
+
+	loopnummax=max(loopnummax,loopnumt)
 
 	Spm_measure_signal=signal
 	loop_counter=0d0
@@ -1019,21 +1146,20 @@ subroutine gencurstateop(i,b_pos,crsign)
 
 	mm_pos=i
 	if (crsign==0) then
-		!print*,crsign
+		!print*,"---",crsign,b_pos,opstring(mm_pos)/4
 		do k=1, mxl
 			s=bsites(k,b_pos)
 			if (s==-1) cycle
 			vt0=dxl*mm_pos+k-1
 			vt1=dxl*mm_pos+k-1+mxl
 			if (vertexlist_map(custstateop(s))/=vt0) then
-				print*,vertexlist_map(custstateop(s)),vt0
+				print*,vertexlist_map(custstateop(s)),vt0,"map_error"
 				pause
 			endif
 			vertexlist_map(custstateop(s))=vt0
 			vertexlist_map(vt0)=custstateop(s)
 			custstateop(s)=vt1
 		enddo
-		!print*,mod(opstring(mm_pos),2)
 	elseif (crsign==1) then
 		!print*,crsign
 		do k=1,mxl
@@ -1135,6 +1261,166 @@ subroutine gencurstateop(i,b_pos,crsign)
 
 end subroutine gencurstateop
 !==================================================!
+
+
+!==================================================!
+subroutine updateoporder(mm_pos,crsign)
+	use configuration
+	use measurementdata
+	implicit none
+
+	integer :: mm_pos,opod1,opod0,mm_0,mm_1,mm_tmp,opod_tmp1,opod_tmp2
+	integer :: i,k,crsign,opod_pos,sz,tmp,ersign
+	integer, allocatable :: opordercopy(:)
+
+	i=size(oporder,dim=1)
+	if (i<2*nh) then
+		allocate(opordercopy(i))
+		opordercopy(:)=oporder(:)
+		deallocate(oporder)
+		allocate(oporder(2*nh))
+		oporder(:)=-1
+		oporder(1:i)=opordercopy(1:i)
+	endif
+
+	if (crsign==1) then
+		if (nh==1) then
+			tauscale(:)=1
+			oporder(1)=mm_pos
+		else
+			opod0=tauscale(mm_pos)
+			opod1=mod(opod0,nh-1)+1
+			mm_0=oporder(opod0)
+			mm_1=oporder(opod1)
+
+			if (mm_1==mm_0) then
+				if (mm_pos<mm_0) then
+					oporder(opod0+1:nh)=oporder(opod0:nh-1)
+					opod_pos=opod0
+					opod0=mod(opod0,nh)+1
+				else
+					opod_pos=nh
+				endif
+			elseif (mm_1<mm_0) then
+				if (mm_pos>mm_0) then
+					opod_pos=nh
+				elseif (mm_pos<mm_1) then
+					oporder(opod1+1:nh)=oporder(opod1:nh-1)
+					opod_pos=opod1
+					opod1=mod(opod1,nh)+1
+				endif
+			else
+				oporder(opod1+1:nh)=oporder(opod1:nh-1)
+				opod_pos=opod1
+				opod1=mod(opod1,nh)+1
+			endif
+			oporder(opod_pos)=mm_pos
+
+
+			!print*,"0",opod0,mm_0,mm_pos,nh
+			!print*,"1",opod1,mm_1,mm_pos,nh
+			!print*,"sta",opod_pos,mm_pos
+			!print*,"==============================="
+			!pause
+
+			!print*,"++++++++++++++++++++++++++++++++++++++++++"
+			!sz=size(oporder,dim=1)
+			!print*,"0",opod0,mm_0,mm_pos,nh
+			!print*,"1",opod1,mm_1,mm_pos,nh
+			!print*,"sta",opod_pos,mm_pos
+			!print*,"==============================="
+			!tmp=-1
+			!ersign=0
+			!do i=1,sz
+			!	print*,"oporder",i,oporder(i),nh,size(oporder,dim=1)
+			!	if (tmp>=oporder(i) .and. i<=nh) then
+			!		ersign=1
+			!		!pause
+			!	endif
+			!	tmp=oporder(i)
+			!enddo
+
+			if (opod_pos/=nh) then
+				do i=opod_pos,nh-1
+					opod_tmp1=i
+					opod_tmp2=mod(opod_tmp1,nh)+1
+					tauscale(oporder(opod_tmp1):oporder(opod_tmp2)-1)=opod_tmp1
+				enddo
+			endif
+			tauscale(oporder(nh):mm-1)=nh
+			tauscale(0:oporder(1)-1)=nh
+		endif
+	elseif (crsign==-1) then
+		if (nh==0) then
+			tauscale(:)=-1
+			oporder(:)=-1
+		else
+			opod_pos=tauscale(mm_pos)
+			opod0=mod(opod_pos-2,nh+1)+1
+			opod1=mod(opod_pos,nh+1)+1
+			mm_0=oporder(opod0)
+			mm_1=oporder(opod1)
+
+			!print*,"]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]"
+			!sz=size(oporder,dim=1)
+			!print*,"0",opod0,mm_0,mm_pos,nh
+			!print*,"1",opod1,mm_1,mm_pos,nh
+			!print*,"sta",opod_pos,mm_pos
+			!print*,"==============================="
+			!tmp=-1
+			!ersign=0
+			!do i=1,sz
+			!	print*,"oporder",i,oporder(i),nh,size(oporder,dim=1)
+			!	if (tmp>=oporder(i) .and. i<=nh) then
+			!		ersign=1
+			!		!pause
+			!	endif
+			!	tmp=oporder(i)
+			!enddo
+
+			if (opod_pos==nh+1) then
+				oporder(opod_pos)=-1
+			else
+				oporder(opod_pos:nh)=oporder(opod1:nh+1)
+				oporder(nh+1)=-1
+				!print*,"opod_pos:nh",opod_pos,nh
+				!print*,"opod1:nh+1",opod1,nh+1
+			endif
+
+			!sz=size(oporder,dim=1)
+			!print*,"0",opod0,mm_0,mm_pos,nh
+			!print*,"1",opod1,mm_1,mm_pos,nh
+			!print*,"sta",opod_pos,mm_pos
+			!print*,"==============================="
+			!tmp=-1
+			!ersign=0
+			!do i=1,sz
+			!	print*,"oporder",i,oporder(i),nh,size(oporder,dim=1)
+			!	if (tmp>=oporder(i) .and. i<=nh) then
+			!		ersign=1
+			!		!pause
+			!	endif
+			!	tmp=oporder(i)
+			!enddo
+			!if (ersign==1) pause
+
+			if (opod0/=nh) then
+				do i=opod0,nh-1
+					opod_tmp1=i
+					opod_tmp2=mod(opod_tmp1,nh)+1
+					tauscale(oporder(opod_tmp1):oporder(opod_tmp2)-1)=opod_tmp1
+				enddo
+			endif
+			tauscale(oporder(nh):mm-1)=nh
+			tauscale(0:oporder(1)-1)=nh
+		endif
+	endif
+
+
+end subroutine updateoporder
+!==================================================!
+
+
 !==================================================!
 subroutine loadlooptable(i) 
 	use configuration
@@ -1307,6 +1593,7 @@ subroutine adjustcutoff(step)
 	use configuration
 	implicit none
 
+	integer, allocatable :: tauscalecopy(:)
 	integer, allocatable :: stringcopy(:)
 	integer, allocatable :: opstfpcopy(:,:)
 	integer, allocatable :: vertexlistcopy(:,:)
@@ -1314,24 +1601,30 @@ subroutine adjustcutoff(step)
  	integer :: mmnew,step
 
  	mmnew=nh+nh/3
- 	if (mmnew<=mm) return
  	!print*,"adj"
+ 	if (mmnew<=mm) return
 
  	allocate(stringcopy(0:mm-1))
  	stringcopy(:)=opstring(:)
  	deallocate(opstring)
  	allocate(opstring(0:mmnew-1))
  	opstring(:)=0
+ 	!print*,"check0"
 
+ 	allocate(tauscalecopy(0:mm-1))
+ 	tauscalecopy(:)=tauscale(:)
  	deallocate(tauscale)
  	allocate(tauscale(0:mmnew-1))
- 	tauscale(:)=0
+ 	tauscale(0:mm-1)=tauscalecopy(:)
+ 	tauscale(mm:mmnew-1)=nh
+ 	!print*,"check1"
 
  	allocate(opstfpcopy(0:mm-1,2*bnd))
  	opstfpcopy(:,:)=opstfp(:,:)
  	deallocate(opstfp)
  	allocate(opstfp(0:mmnew-1,2*bnd))
  	opstfp(:,:)=0d0
+ 	!print*,"check2"
 
  	opstring(0:mm-1)=stringcopy(:)
  	opstring(mm:mmnew-1)=0
@@ -1339,6 +1632,7 @@ subroutine adjustcutoff(step)
  	opstfp(0:mm-1,:)=opstfpcopy(:,:)
  	opstfp(mm:mmnew-1,:)=0
  	deallocate(opstfpcopy)
+ 	!print*,"check3"
 
  	allocate(vertexlistcopy(0:dxl*mm-1,3))
  	vertexlistcopy(:,:)=vertexlist(:,:)
@@ -1347,6 +1641,7 @@ subroutine adjustcutoff(step)
  	vertexlist(:,:)=0d0
  	vertexlist(0:dxl*mm-1,:)=vertexlistcopy(0:dxl*mm-1,:)
  	deallocate(vertexlistcopy)
+ 	!print*,"check4"
 
  	allocate(vertexlist_mapcopy(0:dxl*mm-1))
  	vertexlist_mapcopy(:)=vertexlist_map(:)
@@ -1355,12 +1650,14 @@ subroutine adjustcutoff(step)
  	vertexlist_map(:)=-1
  	vertexlist_map(0:dxl*mm-1)=vertexlist_mapcopy(0:dxl*mm-1)
  	deallocate(vertexlist_mapcopy)
+ 	!print*,"check5"
 
  	mm=mmnew
 
  	open(unit=10,file='info.dat',position='append')
  	write(10,*)' Step: ',step,'  Cut-off L: ',mm,'  Current nh: ',nh
  	close(10)
+ 	!print*,"check6"
 
  end subroutine adjustcutoff
 !==================================================!
@@ -1382,7 +1679,7 @@ subroutine measure()
 	allocate(jj(2))
 	allocate(ag(2))
 
-	looptmp=max(loopnumber,rebootloop(rebootnum))
+	looptmp=loopnummax
 	allocate(statelist(looptmp))
 	do i=1, looptmp
 		statelist(i)=int(ran()*sun)+1
@@ -1445,7 +1742,6 @@ subroutine measure()
 	 	if (op/=0) then
 	 		b=op/4
 			call gencurstateop(i,b,0)
-
 			if (b<=2*nn) then
 				s0=i*dxl+mxl-1
 				mrk0=vertexlist(s0,1)
@@ -1487,6 +1783,7 @@ subroutine measure()
 
 	 end do
 	 
+
 	 if (mm/=0) then
     	am1=am1/dble(mm)
     	am2=am2/dble(mm)
@@ -1896,6 +2193,7 @@ subroutine taugrid(gtype,tmax)
  close(10)
 
  allocate(tc(0:ntau)) 
+ allocate(tcor_real(0:ntau,nn)) 
  allocate(tcor(0:ntau,nq_all)) 
  allocate(tcorpm(0:ntau,nq_all))
  allocate(tcordm(0:ntau,nn,4))
@@ -1920,6 +2218,135 @@ subroutine taugrid(gtype,tmax)
 
  end subroutine taugrid
  !==================================================!		
+
+
+
+!==================================================!
+
+ subroutine random_tau()
+!---------------------------------------------!
+!time dependent q-space correlation functions S+S-
+!---------------------------------------------!
+ use configuration
+ use measurementdata
+ implicit none
+
+ integer :: i,j,k
+ real(8), external :: ran
+
+ if ( size(rantau, dim=1)/=nh+1 ) then
+ 	deallocate(rantau)
+ 	allocate(rantau(nh))
+ endif 
+
+ rantau(nh)=beta
+ do i=1,nh
+ 	rantau(i)=ran()*beta
+ enddo
+
+ call quick_sort(rantau,nh,1,nh)
+ 
+ end subroutine random_tau
+!==================================================!
+!==================================================!
+
+recursive subroutine quick_sort(a,n,s,e)
+implicit none
+integer :: n      
+real(8) :: a(1:n+1) 
+integer :: s      
+integer :: e      
+integer :: l,r    
+real(8) :: k      
+real(8) :: temp   
+l=s
+r=e+1
+if ( r<=l ) return
+
+k=a(s) 
+do while(.true.)
+
+	do while( .true. )
+		l=l+1
+		if ( (a(l) > k) .or. (l>=e) ) exit
+	end do
+
+	do while( .true. )
+		r=r-1
+		if ( (a(r) < k) .or. (r<=s) ) exit
+	end do
+	if ( r <= l ) exit
+
+	temp=a(l)
+	a(l)=a(r)
+	a(r)=temp
+end do
+ 
+temp=a(s)
+a(s)=a(r)
+a(r)=temp
+
+call quick_sort(a,n,s,r-1) 
+call quick_sort(a,n,r+1,e)
+return
+end subroutine quick_sort
+!==================================================!
+
+subroutine measure2()
+!---------------------------------------------!
+! time dependent q-space correlation functions
+!---------------------------------------------!
+ use configuration
+ use measurementdata
+ implicit none
+
+ integer :: i,j,rx,ry,r,s,q,b,op,s1,s2,t1,t2,dt,dd,s0,taumark,dv,k,sig,bs
+ real(8), external :: qx
+ real(8), external :: qy
+ real(8) :: dimer_background
+ integer, allocatable :: dimer_config(:,:)
+ real(8), allocatable :: dimer_space(:,:)
+ allocate(dimer_config(ns,nn))
+ allocate(dimer_space(nn,0:ntau))
+ dimer_space=0d0
+ dimer_config=0d0
+ dimer_background=0d0
+
+
+ i=0
+ s0=1
+ dd=0d0
+ do i=0,mm-1
+    op=opstring(i)
+    taumark=tauscale(i)
+	do s=s0,ns
+    	if ( dble(s)/dble(ns)*beta > rantau(mod(taumark,nh)+1) ) then
+    		s0=s
+    		exit 
+    	endif
+
+    enddo
+ enddo
+
+ dimer_background=dimer_background/dble(dd)
+
+ do q=1,nn           ! loop over q points
+    dd=0
+    tc=0d0
+    do t1=1,ns,tstp   ! average time point t1 over time slices
+       	do dt=0,ntau
+       	enddo
+       	dd=dd+1        ! count the number of measurements for t-averages
+    enddo
+    tcor(:,q)=tcor(:,q)+tc(:)/dble(dd)  
+ enddo
+
+ dimerbg=dimerbg+dimer_background
+
+ nms2=nms2+1
+
+
+end subroutine measure2
  
 !==================================================!
 	
@@ -2056,7 +2483,7 @@ subroutine writeconfig(rank)
 !---------------------!
  use configuration
  implicit none
- integer :: i,rank
+ integer :: i,rank,j,op
  character(len=3) :: ranks
  write (ranks,fmt='(i3.3)') rank
  print*, 'conf'//ranks//'.log'
@@ -2071,6 +2498,7 @@ subroutine writeconfig(rank)
  allocate(vertexlist(0:dxl*mm-1,3))
  allocate(vertexlist_map(0:dxl*mm-1))
  allocate(rantau(nh)) 
+ allocate(oporder(2*nh))
  do i=0,mm-1
     read(10,*)opstring(i),opstfp(i,:)
  enddo
@@ -2080,6 +2508,18 @@ subroutine writeconfig(rank)
  enddo
  read(10,*)loopnum0,loopnum1,loopnumber
  close(10)
+
+ j=nh
+ do i=0,mm-1
+   	op=opstring(i)
+   	if (op==0) then
+   		tauscale(i)=j
+   		cycle
+   	endif
+    j=mod(j,nh)+1
+    oporder(j)=i
+    tauscale(i)=j
+ enddo
  end subroutine readconfig
 
 !----------------------------------------------!
